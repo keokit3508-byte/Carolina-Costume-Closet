@@ -62,6 +62,7 @@ nav a.on{background:var(--sky);color:var(--navy)}
 .chips::-webkit-scrollbar{display:none}
 .chip{flex-shrink:0;border:1.5px solid var(--line);background:#fff;border-radius:999px;padding:8px 14px;font-weight:600;font-size:14px;cursor:pointer;color:var(--mute)}
 .chip.on{background:var(--navy);border-color:var(--navy);color:#fff}
+.chip.mini{padding:5px 10px;font-size:12px}
 .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;padding:8px 0 40px}
 @media(min-width:720px){.grid{grid-template-columns:repeat(3,1fr);gap:20px}}
 @media(min-width:1000px){.grid{grid-template-columns:repeat(4,1fr)}}
@@ -75,6 +76,7 @@ nav a.on{background:var(--sky);color:var(--navy)}
 .card .meta{padding:12px 14px 14px}
 .card h3{margin:0 0 4px;font-size:15px;line-height:1.3}
 .card .sub{color:var(--mute);font-size:13px}
+.card .sub.by{margin-top:3px;color:var(--blue-d);font-weight:600}
 .empty{text-align:center;color:var(--mute);padding:50px 10px}
 .detail{display:grid;gap:24px;padding:24px 0 50px}
 @media(min-width:820px){.detail{grid-template-columns:1fr 1fr;gap:40px;align-items:start}}
@@ -85,7 +87,7 @@ nav a.on{background:var(--sky);color:var(--navy)}
 .box{background:#fff;border:1px solid var(--line);border-radius:var(--r);padding:18px;margin-top:18px}
 .box h3{margin:0 0 12px;font-size:16px}
 label{display:block;font-size:13px;font-weight:600;color:var(--mute);margin:10px 0 6px}
-input[type=text],input[type=email],input[type=password],input[type=date],select,textarea{width:100%;padding:12px 14px;border:1.5px solid var(--line);border-radius:12px;background:#fff;font-size:16px;outline:none}
+input[type=text],input[type=email],input[type=tel],input[type=password],input[type=date],select,textarea{width:100%;padding:12px 14px;border:1.5px solid var(--line);border-radius:12px;background:#fff;font-size:16px;outline:none}
 input:focus,select:focus,textarea:focus{border-color:var(--blue)}
 .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .note{font-size:13px;color:var(--mute);margin-top:10px;line-height:1.5}
@@ -138,7 +140,8 @@ const SUPABASE_KEY = "sb_publishable_1r2kjgK4LEdE8XiapCuZjw_839p-dRU";
 const PRICE = 10, MAX_COSTUMES = 2, MAX_ACCESSORIES = 1;
 const VENMO = "Keokitakeno";
 const MAX_DAYS = 7;
-const CATEGORIES = ["Halloween","Decades","Theme Party","Group Costume","Animals","Characters","Accessories","Other"];
+const CATEGORIES = ["Halloween","Decades","Theme Party","Group Costume","Animals","Characters","Other"];
+const cats = c => (c?.categories?.length ? c.categories : (c?.category && c.category !== "Accessories" ? [c.category] : []));
 const SIZES = ["XS","S","M","L","XL","XXL","One Size"];
 // ==========================================
 
@@ -171,6 +174,19 @@ function timeLeft(p){
   const d = Math.ceil((new Date(p.active_until) - Date.now()) / 86400000);
   return d > 0 ? `${d} day${d === 1 ? "" : "s"} left` : "Expired";
 }
+const digits = s => String(s || "").replace(/[^\d+]/g, "");
+async function teamList(){
+  const { data } = await sb.from("profiles").select("id, name, email, phone").eq("is_team", true).order("name");
+  return data || [];
+}
+let listers = null;
+async function loadListers(){
+  if (listers) return listers;
+  const { data } = await sb.rpc("team_names");
+  listers = Object.fromEntries((data || []).map(p => [p.id, p.name]));
+  return listers;
+}
+const listedBy = c => (listers && c?.listed_by && listers[c.listed_by]) ? listers[c.listed_by].split(" ")[0] : "";
 function payBox(){
   const note = encodeURIComponent("Carolina Costume Closet membership - " + (session?.user?.email || ""));
   const url = `https://venmo.com/${VENMO}?txn=pay&amount=${PRICE}&note=${note}`;
@@ -215,7 +231,7 @@ async function browse(){
   document.getElementById("q").oninput = e => { ui.q = e.target.value; drawGrid(); };
   document.getElementById("types").onclick = e => { const b=e.target.closest("[data-t]"); if(!b) return; ui.type=b.dataset.t; browseChips(); drawGrid(); };
   document.getElementById("cats").onclick = e => { const b=e.target.closest("[data-c]"); if(!b) return; ui.cat=b.dataset.c; browseChips(); drawGrid(); };
-  const { data, error } = await sb.from("costumes").select("*").neq("status","Hidden").order("created_at",{ascending:false});
+  const [{ data, error }] = await Promise.all([sb.from("costumes").select("*").neq("status","Hidden").order("created_at",{ascending:false}), loadListers()]);
   if (error){ document.getElementById("grid").innerHTML = `<div class="msg err" style="grid-column:1/-1">Couldn't load costumes: ${esc(error.message)}</div>`; return; }
   costumesCache = data || [];
   drawGrid();
@@ -229,19 +245,19 @@ function drawGrid(){
   const q = ui.q.trim().toLowerCase();
   const list = costumesCache.filter(c =>
     (ui.type==="All" || c.type===ui.type) &&
-    (ui.cat==="All" || c.category===ui.cat) &&
-    (!q || [c.name,c.description,c.category,c.size].join(" ").toLowerCase().includes(q)));
+    (ui.cat==="All" || cats(c).includes(ui.cat)) &&
+    (!q || [c.name,c.description,...cats(c),c.size].join(" ").toLowerCase().includes(q)));
   g.innerHTML = list.length ? list.map(c => `
     <a class="card" href="#/item/${c.id}">
       <div class="ph">${photo(c)}<span class="tag ${c.status==="Out"?"out":""}">${c.status==="Out"?"Rented out":"Available"}</span></div>
-      <div class="meta"><h3>${esc(c.name)}</h3><div class="sub">${esc([c.size, c.category].filter(Boolean).join(" · "))}</div></div>
+      <div class="meta"><h3>${esc(c.name)}</h3><div class="sub">${esc([c.size, ...cats(c)].filter(Boolean).join(" · "))}</div>${listedBy(c) ? `<div class="sub by">Listed by ${esc(listedBy(c))}</div>` : ""}</div>
     </a>`).join("") : `<div class="empty" style="grid-column:1/-1">${costumesCache.length ? "Nothing matches that. Try another search." : "The closet is empty right now. Check back soon!"}</div>`;
 }
 
 // ---------- ITEM ----------
 async function item(id){
   loading();
-  const { data: c, error } = await sb.from("costumes").select("*").eq("id", id).maybeSingle();
+  const [{ data: c, error }] = await Promise.all([sb.from("costumes").select("*").eq("id", id).maybeSingle(), loadListers()]);
   if (error || !c){ app.innerHTML = `<div class="page"><div class="msg err">That costume wasn't found.</div><a class="back" href="#/">← Back to the closet</a></div>`; return; }
   let action;
   if (c.status === "Out") action = `<div class="msg info">This one is rented out right now. Check back after it's returned.</div>`;
@@ -257,7 +273,7 @@ async function item(id){
       <label>Anything we should know? (optional)</label>
       <textarea name="notes" rows="2" placeholder="Event, sizing question, pickup time…"></textarea>
       <button class="btn" style="width:100%;margin-top:14px" type="submit">Request this ${c.type==="Accessory"?"accessory":"costume"}</button>
-      <p class="note">The team confirms your request and lets you know where to pick it up. Payment is your monthly membership, nothing extra.</p>
+      <p class="note">Once the team confirms, you’ll see who to text under My Rentals to set up a pickup time and place. Payment is your monthly membership, nothing extra.</p>
       <div id="rmsg"></div>
     </form>`;
   app.innerHTML = `
@@ -269,8 +285,9 @@ async function item(id){
         <h1>${esc(c.name)}</h1>
         <div class="kv">
           ${c.size?`<span class="pill">Size ${esc(c.size)}</span>`:""}
-          ${c.category?`<span class="pill">${esc(c.category)}</span>`:""}
+          ${cats(c).map(k=>`<span class="pill">${esc(k)}</span>`).join("")}
           ${c.condition?`<span class="pill">${esc(c.condition)} condition</span>`:""}
+          ${listedBy(c)?`<span class="pill">Listed by ${esc(listedBy(c))}</span>`:""}
         </div>
         ${c.description?`<p class="desc">${esc(c.description)}</p>`:""}
         <div class="box"><h3>Rent it</h3>${action}</div>
@@ -305,6 +322,16 @@ async function rentals(){
   if (!session) return go("login?next=rentals");
   loading();
   const { data, error } = await sb.from("requests").select("*, costumes(name, photo_url, type)").eq("member_id", session.user.id).order("created_at",{ascending:false});
+  const { data: contacts } = await sb.rpc("my_rental_contacts");
+  const contactFor = id => (contacts || []).find(c => c.request_id === id);
+  const pickup = r => {
+    if (r.status === "Pending") return `<small>Waiting for the team to confirm.</small>`;
+    if (r.status !== "Confirmed") return "";
+    const c = contactFor(r.id);
+    if (!c || !c.phone) return `<div class="msg info" style="margin-top:8px">Confirmed! The team will reach out to set up pickup.</div>`;
+    return `<div class="msg ok" style="margin-top:8px">Confirmed! Text <strong>${esc(c.name || "the team")}</strong> to set a pickup time and place.
+      <a class="btn sm" style="margin-top:8px;display:flex" href="sms:${esc(digits(c.phone))}">Text ${esc(c.phone)}</a></div>`;
+  };
   const open = (data||[]).filter(r => ["Pending","Confirmed"].includes(r.status));
   const cos = open.filter(r=>r.item_type==="Costume").length, acc = open.filter(r=>r.item_type==="Accessory").length;
   app.innerHTML = `
@@ -319,7 +346,7 @@ async function rentals(){
           <div class="th">${photo(r.costumes)}</div>
           <div class="info"><b>${esc(r.costumes?.name || "Item")}</b>
             <small>${fmt(r.pickup_date)} → ${fmt(r.return_by)}</small>
-            <span class="st ${esc(r.status)}">${esc(r.status)}</span></div>
+            <span class="st ${esc(r.status)}">${esc(r.status)}</span>${pickup(r)}</div>
         </div>`).join("") : `<div class="empty">No rentals yet. <a href="#/">Browse the closet</a></div>`}</div>
     </div>`;
 }
@@ -374,7 +401,10 @@ async function team(){
 }
 
 async function teamRequests(tb){
-  const { data, error } = await sb.from("requests").select("*, costumes(id, name, photo_url), profiles(name, email)").order("created_at",{ascending:false});
+  const [{ data, error }, team] = await Promise.all([
+    sb.from("requests").select("*, costumes(id, name, photo_url, listed_by), profiles(name, email)").order("created_at",{ascending:false}),
+    teamList()]);
+  const owner = id => team.find(p => p.id === id);
   if (error){ tb.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
   const order = {Pending:0, Confirmed:1, Returned:2, Cancelled:3};
   const list = (data||[]).sort((a,b)=>order[a.status]-order[b.status]);
@@ -383,6 +413,7 @@ async function teamRequests(tb){
       <div class="th">${photo(r.costumes)}</div>
       <div class="info"><b>${esc(r.costumes?.name || "Item")}</b>
         <small>${esc(r.profiles?.name || "")} · ${esc(r.profiles?.email || "")}</small>
+        <small>Listed by: <strong>${esc(owner(r.costumes?.listed_by)?.name || "nobody yet")}</strong></small>
         <small>${fmt(r.pickup_date)} → ${fmt(r.return_by)}${r.notes?` · “${esc(r.notes)}”`:""}</small>
         <span class="st ${esc(r.status)}">${esc(r.status)}</span></div>
       <div class="acts">
@@ -402,23 +433,39 @@ async function teamRequests(tb){
 }
 
 async function teamCloset(tb){
-  const { data, error } = await sb.from("costumes").select("*").order("created_at",{ascending:false});
+  const [{ data, error }, team] = await Promise.all([sb.from("costumes").select("*").order("created_at",{ascending:false}), teamList()]);
   if (error){ tb.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
-  tb.innerHTML = `<div class="list">${(data||[]).length ? data.map(c => `
+  tb.innerHTML = `<p class="note">“Listed by” is who renters text for pickup once a rental is confirmed.</p><div class="list">${(data||[]).length ? data.map(c => `
     <div class="item">
       <div class="th">${photo(c)}</div>
-      <div class="info"><b>${esc(c.name)}</b><small>${esc([c.type,c.size,c.category].filter(Boolean).join(" · "))}</small></div>
+      <div class="info"><b>${esc(c.name)}</b><small>${esc([c.type,c.size].filter(Boolean).join(" · "))}</small>
+        <div class="chips" style="flex-wrap:wrap;padding-top:6px">${CATEGORIES.map(k=>`<button class="chip mini ${cats(c).includes(k)?"on":""}" data-cat="${esc(k)}" data-cid="${c.id}">${esc(k)}</button>`).join("")}</div></div>
       <div class="acts">
+        <select data-o="${c.id}" style="width:auto;padding:8px 12px" title="Listed by"><option value="">Listed by…</option>${team.map(p=>`<option value="${p.id}" ${c.listed_by===p.id?"selected":""}>${esc(p.name || p.email)}</option>`).join("")}</select>
         <select data-s="${c.id}" style="width:auto;padding:8px 12px">${["Available","Out","Hidden"].map(s=>`<option ${c.status===s?"selected":""}>${s}</option>`).join("")}</select>
         <button class="btn sm red" data-del="${c.id}">Delete</button>
       </div>
     </div>`).join("") : `<div class="empty">No items yet. Use “Add item”.</div>`}</div>`;
   tb.onchange = async e => {
+    const o = e.target.closest("[data-o]");
+    if (o){ listers = null; const { error } = await sb.from("costumes").update({ listed_by: o.value || null }).eq("id", o.dataset.o); if (error) alertMsg(tb, error); return; }
     const s = e.target.closest("[data-s]"); if (!s) return;
     const { error } = await sb.from("costumes").update({ status: s.value }).eq("id", s.dataset.s);
     if (error) alertMsg(tb, error);
   };
   tb.onclick = async e => {
+    const k = e.target.closest("[data-cat]");
+    if (k){
+      const item = (data||[]).find(x => String(x.id) === k.dataset.cid);
+      const cur = cats(item), name = k.dataset.cat;
+      const next = cur.includes(name) ? cur.filter(x => x !== name) : [...cur, name];
+      k.disabled = true;
+      const { error } = await sb.from("costumes").update({ categories: next }).eq("id", item.id);
+      k.disabled = false;
+      if (error) return alertMsg(tb, error);
+      item.categories = next; k.classList.toggle("on", next.includes(name));
+      return;
+    }
     const d = e.target.closest("[data-del]"); if (!d) return;
     if (d.dataset.confirm !== "1"){ d.dataset.confirm = "1"; d.textContent = "Tap again to delete"; return; }
     const { error } = await sb.from("costumes").delete().eq("id", d.dataset.del);
@@ -435,15 +482,15 @@ function teamAdd(tb){
         <div><label>Type</label><select name="type"><option>Costume</option><option>Accessory</option></select></div>
         <div><label>Size</label><select name="size">${SIZES.map(s=>`<option>${s}</option>`).join("")}</select></div>
       </div>
-      <div class="row2">
-        <div><label>Category</label><select name="category">${CATEGORIES.map(c=>`<option>${c}</option>`).join("")}</select></div>
-        <div><label>Condition</label><select name="condition"><option>New</option><option selected>Good</option><option>Fair</option></select></div>
-      </div>
+      <label>Condition</label><select name="condition"><option>New</option><option selected>Good</option><option>Fair</option></select>
+      <label>Categories (pick as many as fit)</label>
+      <div class="chips" id="addcats" style="flex-wrap:wrap">${CATEGORIES.map(c=>`<button type="button" class="chip" data-pick="${esc(c)}">${esc(c)}</button>`).join("")}</div>
       <label>Description</label><textarea name="description" rows="3" placeholder="What's included, how it fits…"></textarea>
       <button class="btn" style="width:100%;margin-top:16px" type="submit">Add to the closet</button>
       <div id="addm"></div>
     </form>`;
   const f = document.getElementById("add");
+  document.getElementById("addcats").onclick = e => { const b = e.target.closest("[data-pick]"); if (b) b.classList.toggle("on"); };
   f.onsubmit = async e => {
     e.preventDefault();
     const fd = new FormData(f), m = document.getElementById("addm"), b = f.querySelector("button");
@@ -459,10 +506,11 @@ function teamAdd(tb){
         photo_url = sb.storage.from("costume-photos").getPublicUrl(path).data.publicUrl;
       }
       const { error } = await sb.from("costumes").insert({
-        name: fd.get("name"), type: fd.get("type"), size: fd.get("size"), category: fd.get("category"),
-        condition: fd.get("condition"), description: fd.get("description") || null, photo_url });
+        name: fd.get("name"), type: fd.get("type"), size: fd.get("size"),
+        categories: [...f.querySelectorAll("#addcats .chip.on")].map(b => b.dataset.pick),
+        condition: fd.get("condition"), description: fd.get("description") || null, photo_url, listed_by: session.user.id });
       if (error) throw error;
-      f.reset(); m.innerHTML = `<div class="msg ok">Added! Add another or check the Closet tab.</div>`;
+      f.reset(); f.querySelectorAll("#addcats .chip.on").forEach(b => b.classList.remove("on")); m.innerHTML = `<div class="msg ok">Added! Add another or check the Closet tab.</div>`;
     } catch (err){ m.innerHTML = `<div class="msg err">${esc(friendly(err))}</div>`; }
     b.disabled = false; b.textContent = "Add to the closet";
   };
@@ -471,15 +519,31 @@ function teamAdd(tb){
 async function teamMembers(tb){
   const { data, error } = await sb.from("profiles").select("*").order("created_at",{ascending:false});
   if (error){ tb.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
-  tb.innerHTML = `<p class="note">Turn on “Active” once someone has paid $${PRICE}. That starts their 30 days. To renew, switch them off and back on.</p><div class="list">${(data||[]).map(p => `
+  const me = (data||[]).find(p => p.id === session.user.id);
+  tb.innerHTML = `
+    <form id="ph" class="box" style="margin:0 0 16px">
+      <h3>Your pickup phone</h3>
+      <p class="note" style="margin-top:0">Renters see this only after you confirm their rental, so they can text you to set up pickup.</p>
+      <div style="display:flex;gap:8px"><input type="tel" name="phone" placeholder="(919) 555-0123" value="${esc(me?.phone || "")}" autocomplete="tel"><button class="btn" type="submit">Save</button></div>
+      <div id="phm"></div>
+    </form>
+    <p class="note">Turn on “Active” once someone has paid $${PRICE}. That starts their 30 days. To renew, switch them off and back on.</p><div class="list">${(data||[]).map(p => `
     <div class="item">
       <div class="th">${initial(p.name || p.email)}</div>
-      <div class="info"><b>${esc(p.name || "No name")}</b><small>${esc(p.email)}</small><span class="st ${p.is_team?"Confirmed":isActive(p)?"Pending":"Cancelled"}">${esc(timeLeft(p))}</span></div>
+      <div class="info"><b>${esc(p.name || "No name")}</b><small>${esc(p.email)}${p.is_team ? ` · ${p.phone ? esc(p.phone) : "no phone yet"}` : ""}</small><span class="st ${p.is_team?"Confirmed":isActive(p)?"Pending":"Cancelled"}">${esc(timeLeft(p))}</span></div>
       <div class="acts">
         <label class="toggle"><input type="checkbox" data-f="active" data-id="${p.id}" ${p.active?"checked":""}> Active</label>
         <label class="toggle"><input type="checkbox" data-f="is_team" data-id="${p.id}" ${p.is_team?"checked":""}> Team</label>
       </div>
     </div>`).join("")}</div>`;
+  document.getElementById("ph").onsubmit = async e => {
+    e.preventDefault();
+    const v = e.target.elements.phone.value.trim(), m = document.getElementById("phm");
+    if (v && digits(v).replace("+","").length < 10){ m.innerHTML = `<div class="msg err">That doesn't look like a full phone number.</div>`; return; }
+    const { error } = await sb.from("profiles").update({ phone: v || null }).eq("id", session.user.id);
+    if (error){ m.innerHTML = `<div class="msg err">${esc(friendly(error))}</div>`; return; }
+    teamMembers(tb);
+  };
   tb.onchange = async e => {
     const c = e.target.closest("[data-f]"); if (!c) return;
     if (c.dataset.f==="is_team" && c.dataset.id===session.user.id && !c.checked){ c.checked = true; return; }
