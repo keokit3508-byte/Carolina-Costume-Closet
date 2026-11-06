@@ -137,6 +137,7 @@ const SUPABASE_URL = "https://hpjxihxncnbzcqgxtubw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_1r2kjgK4LEdE8XiapCuZjw_839p-dRU";
 const PRICE = 10, MAX_COSTUMES = 2, MAX_ACCESSORIES = 1;
 const VENMO = "Keokitakeno";
+const MAX_DAYS = 7;
 const CATEGORIES = ["Halloween","Decades","Theme Party","Group Costume","Animals","Characters","Accessories","Other"];
 const SIZES = ["XS","S","M","L","XL","XXL","One Size"];
 // ==========================================
@@ -149,12 +150,14 @@ const ui = { q: "", cat: "All", type: "All", teamTab: "requests" };
 
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const initial = n => esc((n || "?").trim()[0] || "?");
-const today = () => new Date().toISOString().slice(0,10);
+const today = () => { const d = new Date(); return new Date(d.getTime() - d.getTimezoneOffset()*60000).toISOString().slice(0,10); };
+const addDays = (s, n) => { const d = new Date(s + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0,10); };
 const fmt = d => d ? new Date(d + "T12:00:00").toLocaleDateString(undefined,{month:"short",day:"numeric"}) : "";
 const photo = (c, cls="") => c?.photo_url ? `<img src="${esc(c.photo_url)}" alt="${esc(c.name)}" loading="lazy">` : `<span class="none ${cls}">🎭</span>`;
 const friendly = e => {
   const m = e?.message || String(e);
   if (/membership is not active/i.test(m)) return `Your membership isn't active yet. Venmo the team $${PRICE} for the month and we'll turn it on.`;
+  if (/up to 7 days|rental is too long/i.test(m)) return `Rentals are ${MAX_DAYS} days max. Pick an earlier return date.`;
   if (/already have/i.test(m)) return m + " Return one first, then you can request another.";
   if (/Invalid login/i.test(m)) return "Wrong email or password.";
   if (/row-level security/i.test(m)) return "You don't have permission to do that.";
@@ -248,8 +251,9 @@ async function item(id){
     <form id="req">
       <div class="row2">
         <div><label>Pickup date</label><input type="date" name="pickup" min="${today()}" required></div>
-        <div><label>Return by</label><input type="date" name="ret" min="${today()}" required></div>
+        <div><label>Return by</label><input type="date" name="ret" required disabled></div>
       </div>
+      <p class="note" id="rnote">Pick a pickup date first. You can keep it up to ${MAX_DAYS} days.</p>
       <label>Anything we should know? (optional)</label>
       <textarea name="notes" rows="2" placeholder="Event, sizing question, pickup time…"></textarea>
       <button class="btn" style="width:100%;margin-top:14px" type="submit">Request this ${c.type==="Accessory"?"accessory":"costume"}</button>
@@ -273,10 +277,21 @@ async function item(id){
       </div>
     </div>`;
   const f = document.getElementById("req");
+  if (f){
+    const pk = f.elements.pickup, rt = f.elements.ret, rn = document.getElementById("rnote");
+    pk.onchange = () => {
+      if (!pk.value){ rt.value = ""; rt.disabled = true; return; }
+      const max = addDays(pk.value, MAX_DAYS);
+      rt.disabled = false; rt.min = pk.value; rt.max = max;
+      if (!rt.value || rt.value < pk.value || rt.value > max) rt.value = max;
+      rn.textContent = `Return by ${fmt(max)} at the latest (${MAX_DAYS} days max).`;
+    };
+  }
   if (f) f.onsubmit = async e => {
     e.preventDefault();
     const fd = new FormData(f), m = document.getElementById("rmsg"), b = f.querySelector("button");
-    if (fd.get("ret") < fd.get("pickup")){ m.innerHTML = `<div class="msg err">Return date has to be after pickup.</div>`; return; }
+    if (!fd.get("ret") || fd.get("ret") < fd.get("pickup")){ m.innerHTML = `<div class="msg err">Return date has to be on or after pickup.</div>`; return; }
+    if (fd.get("ret") > addDays(fd.get("pickup"), MAX_DAYS)){ m.innerHTML = `<div class="msg err">You can keep it up to ${MAX_DAYS} days.</div>`; return; }
     b.disabled = true;
     const { error } = await sb.from("requests").insert({ member_id: session.user.id, costume_id: c.id, pickup_date: fd.get("pickup"), return_by: fd.get("ret"), notes: fd.get("notes") || null });
     b.disabled = false;
