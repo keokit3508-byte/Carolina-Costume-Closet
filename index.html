@@ -48,6 +48,7 @@ nav a.on{background:var(--sky);color:var(--navy)}
 .btn.sm{padding:8px 14px;min-height:36px;font-size:14px}
 .btn.navy{background:var(--navy)}
 .btn.red{background:#fff;color:var(--bad);border:1.5px solid #f1c9c4}
+.btn.venmo{background:#008CFF;width:100%;margin-top:12px}.btn.venmo:hover{background:#0074d4}
 .btn:disabled{opacity:.5;cursor:not-allowed}
 .hero{padding:34px 0 14px}
 .hero h1{font-family:Fraunces,Georgia,serif;font-size:clamp(28px,5vw,44px);color:var(--navy);margin:0 0 8px;line-height:1.1}
@@ -135,6 +136,7 @@ import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 const SUPABASE_URL = "https://hpjxihxncnbzcqgxtubw.supabase.co";
 const SUPABASE_KEY = "sb_publishable_1r2kjgK4LEdE8XiapCuZjw_839p-dRU";
 const PRICE = 10, MAX_COSTUMES = 2, MAX_ACCESSORIES = 1;
+const VENMO = "Keokitakeno";
 const CATEGORIES = ["Halloween","Decades","Theme Party","Group Costume","Animals","Characters","Accessories","Other"];
 const SIZES = ["XS","S","M","L","XL","XXL","One Size"];
 // ==========================================
@@ -158,6 +160,21 @@ const friendly = e => {
   if (/row-level security/i.test(m)) return "You don't have permission to do that.";
   return m;
 };
+
+const isActive = p => !!p && (p.is_team || (p.active && (!p.active_until || new Date(p.active_until) > new Date())));
+function timeLeft(p){
+  if (p.is_team) return "Team · lifetime";
+  if (!p.active || !p.active_until) return "Not active";
+  const d = Math.ceil((new Date(p.active_until) - Date.now()) / 86400000);
+  return d > 0 ? `${d} day${d === 1 ? "" : "s"} left` : "Expired";
+}
+function payBox(){
+  const note = encodeURIComponent("Carolina Costume Closet membership - " + (session?.user?.email || ""));
+  const url = `https://venmo.com/${VENMO}?txn=pay&amount=${PRICE}&note=${note}`;
+  return `<div class="msg info">Your membership isn't active yet. Pay $${PRICE} for the month on Venmo and we'll switch you on, usually the same day.
+    <a class="btn venmo" href="${url}" target="_blank" rel="noopener">Pay $${PRICE} on Venmo</a>
+    <span class="note" style="display:block;margin-top:8px">Venmo: @${VENMO}. Your email is already in the payment note so we know it's you.</span></div>`;
+}
 
 async function loadProfile(){
   profile = null;
@@ -226,7 +243,7 @@ async function item(id){
   let action;
   if (c.status === "Out") action = `<div class="msg info">This one is rented out right now. Check back after it's returned.</div>`;
   else if (!session) action = `<a class="btn" href="#/login?next=item/${c.id}">Sign in to request</a><p class="note">Members pay $${PRICE}/month and can have ${MAX_COSTUMES} costumes + ${MAX_ACCESSORIES} accessory out at once.</p>`;
-  else if (!profile?.active) action = `<div class="msg info">Your membership isn't active yet. Venmo the team $${PRICE} for the month and we'll switch you on, usually the same day.</div>`;
+  else if (!isActive(profile)) action = payBox();
   else action = `
     <form id="req">
       <div class="row2">
@@ -278,9 +295,9 @@ async function rentals(){
   app.innerHTML = `
     <div class="page">
       <h1>My Rentals</h1>
-      ${profile?.active
+      ${isActive(profile)
         ? `<div class="msg info">You have <b>${cos} of ${MAX_COSTUMES}</b> costumes and <b>${acc} of ${MAX_ACCESSORIES}</b> accessory out or pending.</div>`
-        : `<div class="msg info">Your membership isn't active yet. Venmo the team $${PRICE} and we'll switch you on.</div>`}
+        : payBox()}
       ${error ? `<div class="msg err">${esc(error.message)}</div>` : ""}
       <div class="list">${(data||[]).length ? data.map(r => `
         <div class="item">
@@ -439,10 +456,10 @@ function teamAdd(tb){
 async function teamMembers(tb){
   const { data, error } = await sb.from("profiles").select("*").order("created_at",{ascending:false});
   if (error){ tb.innerHTML = `<div class="msg err">${esc(error.message)}</div>`; return; }
-  tb.innerHTML = `<p class="note">Turn on “Active” once someone has paid $${PRICE} for the month.</p><div class="list">${(data||[]).map(p => `
+  tb.innerHTML = `<p class="note">Turn on “Active” once someone has paid $${PRICE}. That starts their 30 days. To renew, switch them off and back on.</p><div class="list">${(data||[]).map(p => `
     <div class="item">
       <div class="th">${initial(p.name || p.email)}</div>
-      <div class="info"><b>${esc(p.name || "No name")}</b><small>${esc(p.email)}</small></div>
+      <div class="info"><b>${esc(p.name || "No name")}</b><small>${esc(p.email)}</small><span class="st ${p.is_team?"Confirmed":isActive(p)?"Pending":"Cancelled"}">${esc(timeLeft(p))}</span></div>
       <div class="acts">
         <label class="toggle"><input type="checkbox" data-f="active" data-id="${p.id}" ${p.active?"checked":""}> Active</label>
         <label class="toggle"><input type="checkbox" data-f="is_team" data-id="${p.id}" ${p.is_team?"checked":""}> Team</label>
@@ -452,7 +469,8 @@ async function teamMembers(tb){
     const c = e.target.closest("[data-f]"); if (!c) return;
     if (c.dataset.f==="is_team" && c.dataset.id===session.user.id && !c.checked){ c.checked = true; return; }
     const { error } = await sb.from("profiles").update({ [c.dataset.f]: c.checked }).eq("id", c.dataset.id);
-    if (error){ c.checked = !c.checked; alertMsg(tb, error); }
+    if (error){ c.checked = !c.checked; alertMsg(tb, error); return; }
+    teamMembers(tb);
   };
 }
 
