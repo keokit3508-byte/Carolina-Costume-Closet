@@ -188,7 +188,7 @@ async function browse(){
     </section>
     <div class="tools">
       <input class="search" id="q" type="search" placeholder="Search costumes…" value="${esc(ui.q)}">
-      <div class="chips" id="types">${["All","Costume","Accessory"].map(t=>`<button class="chip ${ui.type===t?"on":""}" data-t="${t}">${t==="All"?"Everything":t+"s"}</button>`).join("")}</div>
+      <div class="chips" id="types">${["All","Costume","Accessory"].map(t=>`<button class="chip ${ui.type===t?"on":""}" data-t="${t}">${t==="All"?"Everything":t==="Accessory"?"Accessories":"Costumes"}</button>`).join("")}</div>
       <div class="chips" id="cats">${["All",...CATEGORIES].map(c=>`<button class="chip ${ui.cat===c?"on":""}" data-c="${esc(c)}">${c==="All"?"All categories":esc(c)}</button>`).join("")}</div>
     </div>
     <div class="grid" id="grid"><div class="empty" style="grid-column:1/-1">Loading the closet…</div></div>`;
