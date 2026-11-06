@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+
+<html lang="en">
+
+<head>
+
+<meta charset="UTF-8">
+
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<title>Carolina Costume Closet</title>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<style>
+
+  :root { --blue:#4B9CD3; --navy:#13294B; --light:#EEF5FB; }
+
+  * { box-sizing:border-box; }
+
+  body { margin:0; font-family:-apple-system,Segoe UI,Arial,sans-serif; background:#fff; color:var(--navy); }
+
+  header { background:var(--navy); color:#fff; padding:14px 16px; display:flex; align-items:center; gap:10px; }
+
+  header img { width:42px; height:42px; border-radius:50%; background:#fff; }
+
+  header h1 { font-size:18px; margin:0; flex:1; }
+
+  nav { display:flex; background:var(--light); }
+
+  nav button { flex:1; padding:14px; border:0; background:none; font-size:15px; color:var(--navy); cursor:pointer; }
+
+  nav button.on { border-bottom:3px solid var(--blue); font-weight:bold; }
+
+  main { padding:16px; max-width:900px; margin:auto; }
+
+  .bar { display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap; }
+
+  input, select, textarea { padding:12px; border:1px solid #c9d6e3; border-radius:10px; font-size:15px; width:100%; }
+
+  .chips { display:flex; gap:8px; overflow-x:auto; margin-bottom:14px; }
+
+  .chip { padding:8px 14px; border-radius:20px; border:1px solid var(--blue); background:#fff; color:var(--navy); white-space:nowrap; cursor:pointer; }
+
+  .chip.on { background:var(--blue); color:#fff; }
+
+  .grid { display:grid; grid-template-columns:repeat(2,1fr); gap:14px; }
+
+  @media(min-width:700px){ .grid { grid-template-columns:repeat(3,1fr); } }
+
+  .card { border-radius:14px; overflow:hidden; background:var(--light); cursor:pointer; }
+
+  .card img { width:100%; aspect-ratio:3/4; object-fit:cover; display:block; background:#dde8f2; }
+
+  .card div { padding:10px; }
+
+  .card b { display:block; }
+
+  .tag { font-size:12px; padding:3px 8px; border-radius:8px; background:#fff; display:inline-block; margin-top:4px; }
+
+  .btn { background:var(--blue); color:#fff; border:0; padding:14px; border-radius:12px; font-size:16px; width:100%; cursor:pointer; margin-top:10px; }
+
+  .btn.alt { background:#fff; color:var(--navy); border:1px solid var(--blue); }
+
+  .small { padding:8px 12px; font-size:14px; width:auto; margin:4px 4px 0 0; }
+
+  .row { background:var(--light); border-radius:12px; padding:12px; margin-bottom:10px; }
+
+  .muted { color:#5a6b80; font-size:14px; }
+
+  .detail img { width:100%; max-height:480px; object-fit:cover; border-radius:14px; }
+
+  .msg { padding:10px; border-radius:10px; background:#fff7cc; margin:10px 0; }
+
+  .hide { display:none; }
+
+  form > * { margin-bottom:10px; }
+
+</style>
+
+</head>
+
+<body>
+
+<header>
+
+  <img src="logo.png" alt="" onerror="this.style.display='none'">
+
+  <h1>Carolina Costume Closet</h1>
+
+  <span id="who" class="muted" style="color:#cfe3f3"></span>
+
+</header>
+
+<nav>
+
+  <button data-tab="browse" class="on">Browse</button>
+
+  <button data-tab="rentals">My Rentals</button>
+
+  <button data-tab="team" id="teamTab" class="hide">Team</button>
+
+  <button data-tab="account" id="acctTab">Sign in</button>
+
+</nav>
+
+<main id="app"></main>
+
+
+
+<script>
+
+const SUPABASE_URL = "https://hpjxihxncnbzcqgxtubw.supabase.co";
+
+const SUPABASE_KEY = "sb_publishable_1r2kjgK4LEdE8XiapCuZjw_839p-dRU";
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+
+
+let user = null, profile = null, tab = "browse", cat = "All", search = "";
+
+const app = document.getElementById("app");
+
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+const CATS = ["All","Halloween","Decades","Theme Party","Group Costume","Animals","Characters","Accessories","Other"];
+
+
+
+async function loadUser() {
+
+  const { data } = await sb.auth.getUser();
+
+  user = data.user; profile = null;
+
+  if (user) {
+
+    const r = await sb.from("profiles").select("*").eq("id", user.id).single();
+
+    profile = r.data;
+
+  }
+
+  document.getElementById("teamTab").classList.toggle("hide", !profile?.is_team);
+
+  document.getElementById("acctTab").textContent = user ? "Account" : "Sign in";
+
+  document.getElementById("who").textContent = profile?.name || "";
+
+}
+
+
+
+function go(t) {
+
+  tab = t;
+
+  document.querySelectorAll("nav button").forEach(b => b.classList.toggle("on", b.dataset.tab === t));
+
+  render();
+
+}
+
+document.querySelectorAll("nav button").forEach(b => b.onclick = () => go(b.dataset.tab));
+
+
+
+async function render() {
+
+  if (tab === "browse") return browse();
+
+  if (tab === "rentals") return rentals();
+
+  if (tab === "team") return team();
+
+  if (tab === "account") return account();
+
+}
+
+
+
+// ---------- BROWSE ----------
+
+async function browse() {
+
+  app.innerHTML = `
+
+    <div class="bar"><input id="q" placeholder="Search costumes..." value="${esc(search)}"></div>
+
+    <div class="chips">${CATS.map(c => `<button class="chip ${c===cat?'on':''}" data-c="${c}">${c}</button>`).join("")}</div>
+
+    <div class="grid" id="grid"><p class="muted">Loading...</p></div>`;
+
+  document.getElementById("q").oninput = e => { search = e.target.value; drawGrid(); };
+
+  document.querySelectorAll(".chip").forEach(b => b.onclick = () => { cat = b.dataset.c; browse(); });
+
+  drawGrid();
+
+}
+
+async function drawGrid() {
+
+  let q = sb.from("costumes").select("*").eq("status","Available").order("created_at",{ascending:false});
+
+  if (cat !== "All") q = q.eq("category", cat);
+
+  if (search) q = q.ilike("name", `%${search}%`);
+
+  const { data, error } = await q;
+
+  const g = document.getElementById("grid");
+
+  if (error) { g.innerHTML = `<p class="msg">${esc(error.message)}</p>`; return; }
+
+  if (!data.length) { g.innerHTML = `<p class="muted">No costumes here yet.</p>`; return; }
+
+  g.innerHTML = data.map(c => `
+
+    <div class="card" data-id="${c.id}">
+
+      <img loading="lazy" src="${esc(c.photo_url || '')}" alt="">
+
+      <div><b>${esc(c.name)}</b><span class="muted">Size ${esc(c.size || '-')}</span><br>
+
+      <span class="tag">${esc(c.type)}</span></div>
+
+    </div>`).join("");
+
+  document.querySelectorAll(".card").forEach(el => el.onclick = () => detail(el.dataset.id));
+
+}
+
+
+
+async function detail(id) {
+
+  const { data: c } = await sb.from("costumes").select("*").eq("id", id).single();
+
+  if (!c) return browse();
+
+  app.innerHTML = `
+
+    <div class="detail">
+
+      <button class="btn alt small" id="back">← Back</button>
+
+      <img src="${esc(c.photo_url || '')}" alt="">
+
+      <h2>${esc(c.name)}</h2>
+
+      <p class="muted">${esc(c.type)} · ${esc(c.category || '')} · Size ${esc(c.size || '-')} · ${esc(c.condition || '')}</p>
+
+      <p>${esc(c.description || '')}</p>
+
+      <div id="reqArea"></div>
+
+    </div>`;
+
+  document.getElementById("back").onclick = browse;
+
+  const area = document.getElementById("reqArea");
+
+  if (!user) { area.innerHTML = `<button class="btn" id="si">Sign in to request</button>`; document.getElementById("si").onclick = () => go("account"); return; }
+
+  if (!profile?.active) { area.innerHTML = `<p class="msg">Your membership isn't active yet. Pay the $10/month by Venmo and the team will turn it on.</p>`; return; }
+
+  area.innerHTML = `
+
+    <label class="muted">Pickup date</label><input type="date" id="pick">
+
+    <label class="muted">Return by</label><input type="date" id="ret">
+
+    <button class="btn" id="req">Request this</button><div id="out"></div>`;
+
+  document.getElementById("req").onclick = async () => {
+
+    const { error } = await sb.from("requests").insert({
+
+      member_id: user.id, costume_id: c.id,
+
+      pickup_date: document.getElementById("pick").value || null,
+
+      return_by: document.getElementById("ret").value || null
+
+    });
+
+    document.getElementById("out").innerHTML = error
+
+      ? `<p class="msg">${esc(error.message)}</p>`
+
+      : `<p class="msg">Requested! The team will confirm soon. Check My Rentals.</p>`;
+
+  };
+
+}
+
+
+
+// ---------- MY RENTALS ----------
+
+async function rentals() {
+
+  if (!user) { app.innerHTML = `<p class="muted">Sign in to see your rentals.</p>`; return; }
+
+  const { data } = await sb.from("requests").select("*, costumes(name)").eq("member_id", user.id).order("created_at",{ascending:false});
+
+  const outC = data.filter(r => r.item_type==="Costume" && ["Pending","Confirmed"].includes(r.status)).length;
+
+  const outA = data.filter(r => r.item_type==="Accessory" && ["Pending","Confirmed"].includes(r.status)).length;
+
+  app.innerHTML = `
+
+    <p class="msg">Costumes out: ${outC} of 2 · Accessories out: ${outA} of 1</p>
+
+    ${data.length ? data.map(r => `
+
+      <div class="row"><b>${esc(r.costumes?.name)}</b><br>
+
+      <span class="muted">${esc(r.status)} · Pickup ${esc(r.pickup_date || '-')} · Return by ${esc(r.return_by || '-')}</span></div>`).join("")
+
+    : `<p class="muted">No rentals yet.</p>`}`;
+
+}
+
+
+
+// ---------- ACCOUNT ----------
+
+function account() {
+
+  if (user) {
+
+    app.innerHTML = `
+
+      <div class="row"><b>${esc(profile?.name || user.email)}</b><br>
+
+      <span class="muted">${esc(user.email)} · Membership: ${profile?.active ? "Active" : "Not active yet"}</span></div>
+
+      <button class="btn alt" id="out">Sign out</button>`;
+
+    document.getElementById("out").onclick = async () => { await sb.auth.signOut(); await loadUser(); go("browse"); };
+
+    return;
+
+  }
+
+  app.innerHTML = `
+
+    <h2>Sign in or create an account</h2>
+
+    <form id="f">
+
+      <input id="name" placeholder="Your name (new accounts only)">
+
+      <input id="em" type="email" placeholder="UNC email" required>
+
+      <input id="pw" type="password" placeholder="Password (6+ characters)" required>
+
+      <button class="btn" type="submit">Sign in</button>
+
+      <button class="btn alt" type="button" id="up">Create account</button>
+
+    </form><div id="m"></div>`;
+
+  const em = () => document.getElementById("em").value, pw = () => document.getElementById("pw").value;
+
+  const m = t => document.getElementById("m").innerHTML = `<p class="msg">${esc(t)}</p>`;
+
+  document.getElementById("f").onsubmit = async e => {
+
+    e.preventDefault();
+
+    const { error } = await sb.auth.signInWithPassword({ email: em(), password: pw() });
+
+    if (error) return m(error.message);
+
+    await loadUser(); go("browse");
+
+  };
+
+  document.getElementById("up").onclick = async () => {
+
+    const { error } = await sb.auth.signUp({ email: em(), password: pw(), options: { data: { name: document.getElementById("name").value } } });
+
+    if (error) return m(error.message);
+
+    await loadUser();
+
+    m(user ? "Account created! Pay the $10 by Venmo and the team will activate you." : "Check your email to confirm, then sign in.");
+
+  };
+
+}
+
+
+
+// ---------- TEAM ----------
+
+async function team() {
+
+  if (!profile?.is_team) { app.innerHTML = `<p class="muted">Team only.</p>`; return; }
+
+  const [{ data: reqs }, { data: members }, { data: items }] = await Promise.all([
+
+    sb.from("requests").select("*, costumes(name), profiles(name,email)").order("created_at",{ascending:false}),
+
+    sb.from("profiles").select("*").order("created_at",{ascending:false}),
+
+    sb.from("costumes").select("*").order("created_at",{ascending:false})
+
+  ]);
+
+  app.innerHTML = `
+
+    <h2>Requests</h2>
+
+    ${reqs.map(r => `
+
+      <div class="row"><b>${esc(r.costumes?.name)}</b> · ${esc(r.profiles?.name || r.profiles?.email)}<br>
+
+      <span class="muted">${esc(r.status)} · Pickup ${esc(r.pickup_date || '-')} · Return by ${esc(r.return_by || '-')}</span><br>
+
+      ${["Confirmed","Returned","Cancelled"].map(s => `<button class="btn small" data-r="${r.id}" data-s="${s}">${s}</button>`).join("")}
+
+      </div>`).join("") || `<p class="muted">No requests yet.</p>`}
+
+
+
+    <h2>Members</h2>
+
+    ${members.map(p => `
+
+      <div class="row"><b>${esc(p.name || p.email)}</b> <span class="muted">${esc(p.email)}</span><br>
+
+      <span class="muted">${p.active ? "Active" : "Not active"}${p.is_team ? " · Team" : ""}</span><br>
+
+      <button class="btn small" data-m="${p.id}" data-a="${!p.active}">${p.active ? "Deactivate" : "Activate"}</button>
+
+      </div>`).join("")}
+
+
+
+    <h2>Add a costume</h2>
+
+    <form id="add">
+
+      <input id="cn" placeholder="Name" required>
+
+      <select id="ct"><option>Costume</option><option>Accessory</option></select>
+
+      <select id="cc">${CATS.slice(1).map(c => `<option>${c}</option>`).join("")}</select>
+
+      <select id="cs">${["XS","S","M","L","XL","XXL","One Size"].map(s => `<option>${s}</option>`).join("")}</select>
+
+      <select id="co"><option>New</option><option>Good</option><option>Fair</option></select>
+
+      <textarea id="cd" placeholder="Description"></textarea>
+
+      <input id="cp" type="file" accept="image/*">
+
+      <button class="btn" type="submit">Add costume</button>
+
+    </form><div id="am"></div>
+
+
+
+    <h2>All items</h2>
+
+    ${items.map(c => `
+
+      <div class="row"><b>${esc(c.name)}</b> <span class="muted">${esc(c.status)}</span><br>
+
+      ${["Available","Out","Hidden"].map(s => `<button class="btn small alt" data-i="${c.id}" data-st="${s}">${s}</button>`).join("")}
+
+      </div>`).join("")}`;
+
+
+
+  document.querySelectorAll("[data-r]").forEach(b => b.onclick = async () => {
+
+    await sb.from("requests").update({ status: b.dataset.s }).eq("id", b.dataset.r); team();
+
+  });
+
+  document.querySelectorAll("[data-m]").forEach(b => b.onclick = async () => {
+
+    await sb.from("profiles").update({ active: b.dataset.a === "true" }).eq("id", b.dataset.m); team();
+
+  });
+
+  document.querySelectorAll("[data-i]").forEach(b => b.onclick = async () => {
+
+    await sb.from("costumes").update({ status: b.dataset.st }).eq("id", b.dataset.i); team();
+
+  });
+
+  document.getElementById("add").onsubmit = async e => {
+
+    e.preventDefault();
+
+    const am = document.getElementById("am");
+
+    am.innerHTML = `<p class="msg">Uploading...</p>`;
+
+    let photo_url = null;
+
+    const file = document.getElementById("cp").files[0];
+
+    if (file) {
+
+      const path = `${Date.now()}-${file.name.replace(/[^a-z0-9.]/gi,"_")}`;
+
+      const up = await sb.storage.from("costume-photos").upload(path, file);
+
+      if (up.error) { am.innerHTML = `<p class="msg">${esc(up.error.message)}</p>`; return; }
+
+      photo_url = sb.storage.from("costume-photos").getPublicUrl(path).data.publicUrl;
+
+    }
+
+    const { error } = await sb.from("costumes").insert({
+
+      name: document.getElementById("cn").value,
+
+      type: document.getElementById("ct").value,
+
+      category: document.getElementById("cc").value,
+
+      size: document.getElementById("cs").value,
+
+      condition: document.getElementById("co").value,
+
+      description: document.getElementById("cd").value,
+
+      photo_url
+
+    });
+
+    if (error) { am.innerHTML = `<p class="msg">${esc(error.message)}</p>`; return; }
+
+    team();
+
+  };
+
+}
+
+
+
+sb.auth.onAuthStateChange(() => loadUser());
+
+loadUser().then(render);
+
+</script>
+
+</body>
+
+</html>
+
